@@ -2,7 +2,7 @@
 const $ = (s, el = document) => el.querySelector(s);
 const app = $('#app'), panesEl = $('#panes'), statusEl = $('#status'), sideEl = $('#side');
 const coll = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
-const ROW_H = 26;   // 列表行高（虚拟滚动按固定行高计算）
+const ROW_H = 30;   // 列表行高（虚拟滚动按固定行高计算）
 let panes = [], ap = 0, layout = null, closed = [], uid = 0, renaming = null;
 
 const mkTab = (path, o = {}) => ({ id: ++uid, path, items: null, loading: false, err: null, back: [], fwd: [], q: '', rec: false,
@@ -122,9 +122,9 @@ const goFwd = t => t.fwd.length && (t.back.push(t.path), nav(t, t.fwd.pop(), 'hi
 const goUp = t => t.path !== ROOT && nav(t, parentOf(t.path), 'push', t.path);   // 回到上级时选中刚才所在的文件夹
 
 const SKEL = `<div class="tabs"></div>
-<div class="bar"><button class="btn" data-a="back" title="后退 (Alt+←)">←</button><button class="btn" data-a="fwd" title="前进 (Alt+→)">→</button><button class="btn" data-a="up" title="上一级 (Alt+↑)">↑</button><button class="btn hide-n" data-a="refresh" title="刷新 (F5)">⟳</button>
+<div class="bar"><button class="btn" data-a="back" title="后退 (Alt+←)">${ic('back')}</button><button class="btn" data-a="fwd" title="前进 (Alt+→)">${ic('fwd')}</button><button class="btn" data-a="up" title="上一级 (Alt+↑)">${ic('up')}</button><button class="btn hide-n" data-a="refresh" title="刷新 (F5)">${ic('refresh')}</button>
 <div class="crumb" title="点击空白处编辑路径 (Ctrl+L)"></div>
-<div class="search"><span class="ic">🔍</span><input spellcheck="false"><span class="mode" data-a="mode" title="切换：只筛选当前文件夹 / 搜索所有子文件夹 (Ctrl+Shift+F)">子目录</span>
+<div class="search"><span class="ic">${ic('search')}</span><input spellcheck="false"><span class="mode" data-a="mode" title="切换：只筛选当前文件夹 / 搜索所有子文件夹 (Ctrl+Shift+F)">子目录</span>
 <div class="help"><b>搜索语法</b>（可组合，空格分隔）<br><code>report</code> 名称包含<br><code>bg</code> 拼音首字母（报告）<br><code>*.png</code> <code>IMG_10?5*</code> 通配符<br><code>ext:pdf,docx</code> 扩展名<br><code>size:&gt;5mb</code> 大小<br><code>modified:7d</code> 7 天内修改<br><code>type:folder</code> 只看文件夹<br><code>/^IMG_\\d+/</code> 正则<br><code>content:关键字</code> 文件内容（子目录搜索）<br><span class="dim">Enter：在所有子文件夹中搜索</span></div></div></div>
 <div class="list" tabindex="0"></div>`;
 
@@ -205,8 +205,8 @@ function refresh(t, full, reset) {
 
 function renderTabs(pi) {
   const P = panes[pi];
-  $('.tabs', P.el).innerHTML = P.tabs.map((x, i) => `<div class="tab${i === P.act ? ' on' : ''}${x.pin ? ' pin' : ''}" draggable="true" data-t="${i}" title="${esc(displayPath(x.path))}">${x.job || x.loading ? '⏳' : dirIcon(x.path)}${x.pin ? '' : `<span>${esc(x.rec && x.res ? `搜索“${x.q}”` : labelOf(x.path))}</span><i data-a="close" title="关闭 (Ctrl+W)">✕</i>`}</div>`).join('')
-    + '<div class="addtab" data-a="add" title="新建标签 (Ctrl+T)">＋</div>';
+  $('.tabs', P.el).innerHTML = P.tabs.map((x, i) => `<div class="tab${i === P.act ? ' on' : ''}${x.pin ? ' pin' : ''}" draggable="true" data-t="${i}" title="${esc(displayPath(x.path))}">${x.job || x.loading ? ic('refresh', 'spin') : dirIcon(x.path)}${x.pin ? '' : `<span>${esc(x.rec && x.res ? `搜索“${x.q}”` : labelOf(x.path))}</span><i data-a="close" title="关闭 (Ctrl+W)">${ic('x')}</i>`}</div>`).join('')
+    + `<div class="addtab" data-a="add" title="新建标签 (Ctrl+T)">${ic('plus')}</div>`;
 }
 
 function renderPane(pi, reset) {
@@ -218,7 +218,7 @@ function renderPane(pi, reset) {
   $('[data-a=up]', el).disabled = t.path === ROOT;
   const cr = $('.crumb', el);
   if (!$('input', cr)) {
-    cr.innerHTML = [ROOT, ...chainOf(t.path)].map((p, k) => `<a data-k="${k}">${esc(k ? (isDrive(p) ? labelOf(p) : baseName(p)) : '💻 此电脑')}</a>`).join('<em>›</em>');
+    cr.innerHTML = [ROOT, ...chainOf(t.path)].map((p, k) => `<a data-k="${k}">${k ? dirIcon(p) + ' ' + esc(isDrive(p) ? labelOf(p) : baseName(p)) : pcIco() + ' 此电脑'}</a>`).join(`<em>${ic('chev')}</em>`);
     cr.scrollLeft = 1e5;   // 路径太长时显示末尾
   }
   const inp = $('.search input', el);
@@ -256,13 +256,13 @@ function renderList(pi, reset) {
   if (renaming === P) return;   // 正在重命名：先不重画，结束后再刷新
   t.view = getView(t);
   const rec = !!(t.rec && t.res), q = t.q.trim(), span = rec ? 5 : 4;
-  const head = COLS.filter(c => rec || c[0] !== 'l').map(([k, s]) => `<th class="c-${k}" data-s="${k}">${s}${t.sort.k === k ? (t.sort.a > 0 ? ' ▴' : ' ▾') : ''}</th>`).join('');
+  const head = COLS.filter(c => rec || c[0] !== 'l').map(([k, s]) => `<th class="c-${k}" data-s="${k}">${s}${t.sort.k === k ? ic(t.sort.a > 0 ? 'sortUp' : 'sortDown') : ''}</th>`).join('');
   let extra = '';
   if (!t.view.length) {
     const msg = t.err ? `无法打开此文件夹：${errText(t.err)}` : t.loading || !t.items && !rec ? '正在读取…' : q ? (t.job ? '正在搜索…' : `没有找到与“${esc(q)}”匹配的项目`) : '此文件夹为空';
     extra = `<tr><td colspan="${span}" class="empty">${msg}</td></tr>`;
   }
-  if (q && !t.rec) extra += `<tr><td colspan="${span}" class="more">只筛选了当前文件夹 · <a data-a="deep">在所有子文件夹中搜索“${esc(q)}” ⏎</a></td></tr>`;
+  if (q && !t.rec) extra += `<tr><td colspan="${span}" class="more">只筛选了当前文件夹 · <a data-a="deep">在所有子文件夹中搜索“${esc(q)}” ${ic('fwd')}</a></td></tr>`;
   if (rec && t.truncated) extra += `<tr><td colspan="${span}" class="more">结果太多，只显示前 ${t.res.length.toLocaleString()} 项，请加更多条件缩小范围</td></tr>`;
   list.innerHTML = `<table${rec ? ' class="rec"' : ''}><thead><tr>${head}</tr></thead><tbody></tbody><tfoot>${extra}</tfoot></table>`;
   P.range = null;
@@ -319,7 +319,7 @@ function renderStatus() {
   else if (t.rec && t.res) s += `<span>${t.cancelled ? '搜索已取消' : '搜索完成'}，扫描 ${t.scanned.toLocaleString()} 项，用时 ${(t.ms / 1000).toFixed(t.ms < 10000 ? 2 : 0)} 秒</span>`;
   s += `<span class="sp"></span><span>${panes.length > 1 ? (layout === 'v' ? '上下分屏' : '左右分屏') + ' · ' : ''}标签 ${panes[ap].act + 1}/${panes[ap].tabs.length}</span>`;
   statusEl.innerHTML = s;
-  const title = `${labelOf(t.path)} - DirApp`;
+  const title = `${labelOf(t.path)} - Strata`;
   if (document.title !== title) { document.title = title; thisWin.setTitle(title).catch(() => {}); }
   document.querySelectorAll('.tool [data-l]').forEach(b => b.classList.toggle('on', (b.dataset.l || null) === layout));
   sideEl.querySelectorAll('[data-path]').forEach(d => d.classList.toggle('cur', same(d.dataset.path, t.path)));

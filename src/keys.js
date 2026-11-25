@@ -5,7 +5,7 @@ menu.hidden = true;
 document.body.append(menu);
 function showMenu(e, items) {
   e.preventDefault();
-  menu.innerHTML = items.map((it, i) => it ? `<div data-m="${i}">${it[0]}${it[2] ? `<span class="k">${it[2]}</span>` : ''}</div>` : '<hr>').join('');
+  menu.innerHTML = items.map((it, i) => it ? `<div data-m="${i}">${it[3] ? ic(it[3]) : ''}${it[0]}${it[2] ? `<span class="k">${it[2]}</span>` : ''}</div>` : '<hr>').join('');
   menu.items = items;
   menu.hidden = false;
   const r = menu.getBoundingClientRect();
@@ -48,14 +48,14 @@ panesEl.addEventListener('contextmenu', e => {
   if (te) {
     const ti = +te.dataset.t, x = P.tabs[ti];
     return showMenu(e, [
-      ['➕ 新建标签', () => openTab(x.path, pi), 'Ctrl+T'],
-      ['⧉ 复制标签', () => { const c = openTab(x.path, pi, true, ti + 1); c.back = [...x.back]; renderAll(); }],
-      [x.pin ? '📌 取消固定' : '📌 固定标签', () => pinTab(pi, ti)],
+      ['新建标签', () => openTab(x.path, pi), 'Ctrl+T', 'tabPlus'],
+      ['复制标签', () => { const c = openTab(x.path, pi, true, ti + 1); c.back = [...x.back]; renderAll(); }, '', 'copy'],
+      [x.pin ? '取消固定' : '固定标签', () => pinTab(pi, ti), '', 'pin'],
       null,
-      ['◫ 移到另一侧分屏', () => toOther(pi, ti)],
-      ['🗗 移到新窗口', () => toNewWindow(pi, ti)],
+      ['移到另一侧分屏', () => toOther(pi, ti), '', 'splitH'],
+      ['移到新窗口', () => toNewWindow(pi, ti), '', 'window'],
       null,
-      ['✕ 关闭标签', () => closeTab(pi, ti), 'Ctrl+W'],
+      ['关闭标签', () => closeTab(pi, ti), 'Ctrl+W', 'close'],
       ['关闭其他标签', () => closeOthers(pi, x)],
       ['关闭右侧标签', () => closeOthers(pi, x, true)],
     ]);
@@ -65,29 +65,29 @@ panesEl.addEventListener('contextmenu', e => {
     if (!t.sel.has(it.p)) { t.sel = new Set([it.p]); t.anchor = it.p; redrawSel(pi); }
     const sel = selItems(t), drive = it.k === 'drive';
     return showMenu(e, [
-      ['📂 打开', () => openItem(t, it), 'Enter'],
-      ...(it.d ? [['🗂️ 在新标签中打开', () => openTab(it.p, pi, false), '中键'], ['◫ 在另一侧分屏中打开', () => openOther(pi, it.p)]] : [['🧭 打开方式…', () => invoke('shell_open', { path: it.p, verb: 'openas' }).catch(err => toast(errText(err)))]]),
-      ...(t.rec && t.res ? [['📍 打开所在位置', () => nav(t, parentOf(it.p), 'push', it.p)]] : []),
-      ['🪟 在资源管理器中显示', () => reveal(it.p)],
+      ['打开', () => openItem(t, it), 'Enter', 'folderOpen'],
+      ...(it.d ? [['在新标签中打开', () => openTab(it.p, pi, false), '中键', 'tabPlus'], ['在另一侧分屏中打开', () => openOther(pi, it.p), '', 'splitH']] : [['打开方式…', () => invoke('shell_open', { path: it.p, verb: 'openas' }).catch(err => toast(errText(err))), '', 'openWith']]),
+      ...(t.rec && t.res ? [['打开所在位置', () => nav(t, parentOf(it.p), 'push', it.p), '', 'location']] : []),
+      ['在资源管理器中显示', () => reveal(it.p), '', 'external'],
       null,
-      ...(drive ? [] : [['✂️ 剪切', () => setClip(t, true), 'Ctrl+X'], ['📋 复制', () => setClip(t, false), 'Ctrl+C']]),
-      ['🔗 复制路径', () => copyPath(sel), 'Ctrl+Shift+C'],
-      ...(it.d ? [['⌨️ 在终端中打开', () => terminal(it.p)]] : []),
+      ...(drive ? [] : [['剪切', () => setClip(t, true), 'Ctrl+X', 'cut'], ['复制', () => setClip(t, false), 'Ctrl+C', 'copy']]),
+      ['复制路径', () => copyPath(sel), 'Ctrl+Shift+C', 'link'],
+      ...(it.d ? [['在终端中打开', () => terminal(it.p), '', 'terminal']] : []),
       null,
-      ...(drive ? [] : [['✏️ 重命名', () => rename(pi, it.p), 'F2'], ['🗑️ 删除', () => del(t), 'Del']]),
-      ['ℹ️ 属性', () => props(it.p), 'Alt+Enter'],
+      ...(drive ? [] : [['重命名', () => rename(pi, it.p), 'F2', 'edit'], ['删除', () => del(t), 'Del', 'trash']]),
+      ['属性', () => props(it.p), 'Alt+Enter', 'info'],
     ]);
   }
   if (e.target.closest('.list')) {
     const dir = t.path !== ROOT;
     return showMenu(e, [
-      ...(dir ? [['📁 新建文件夹', () => newFolder(pi), 'Ctrl+Shift+N'], ['📋 粘贴', paste, 'Ctrl+V']] : []),
-      ['⟳ 刷新', () => load(t, true), 'F5'],
+      ...(dir ? [['新建文件夹', () => newFolder(pi), 'Ctrl+Shift+N', 'folderPlus'], ['粘贴', paste, 'Ctrl+V', 'paste']] : []),
+      ['刷新', () => load(t, true), 'F5', 'refresh'],
       null,
-      ['🔍 在子文件夹中搜索', () => setMode(t, true), 'Ctrl+Shift+F'],
-      ...(dir ? [['⭐ 收藏此文件夹', () => addFav(t.path)], ['⌨️ 在终端中打开', () => terminal(t.path)], ['🪟 在资源管理器中打开', () => invoke('shell_open', { path: t.path })], ['ℹ️ 属性', () => props(t.path)]] : []),
+      ['在子文件夹中搜索', () => setMode(t, true), 'Ctrl+Shift+F', 'search'],
+      ...(dir ? [['收藏此文件夹', () => addFav(t.path), '', 'star'], ['在终端中打开', () => terminal(t.path), '', 'terminal'], ['在资源管理器中打开', () => invoke('shell_open', { path: t.path }), '', 'external'], ['属性', () => props(t.path), '', 'info']] : []),
       null,
-      [settings.hidden ? '🙈 不显示隐藏文件' : '👁️ 显示隐藏文件', toggleHidden, 'Ctrl+H'],
+      [settings.hidden ? '不显示隐藏文件' : '显示隐藏文件', toggleHidden, 'Ctrl+H', settings.hidden ? 'eyeOff' : 'eye'],
     ]);
   }
 });
@@ -96,6 +96,7 @@ function toggleHidden() {
   settings.hidden = !settings.hidden;
   saveSettings();
   $('#hidbtn').classList.toggle('on', settings.hidden);
+  $('#hidbtn').innerHTML = ic(settings.hidden ? 'eye' : 'eyeOff');
   panes.forEach((P, i) => refresh(cur(i), true));
   toast(settings.hidden ? '显示隐藏文件' : '不显示隐藏文件');
 }
@@ -182,10 +183,10 @@ document.addEventListener('keydown', e => {
 let sideList = new Map();   // 常用文件夹（有序）：key → { path, label, icon }
 function renderSide() {
   let html = '<h4>快速访问</h4>';
-  for (const p of sideList.values()) html += `<div data-path="${esc(p.path)}" title="${esc(p.path)}">${p.icon} ${esc(p.label)}</div>`;
+  for (const p of sideList.values()) html += `<div data-path="${esc(p.path)}" title="${esc(p.path)}">${folderIco(p.icon)}<span>${esc(p.label)}</span></div>`;
   const favs = store.get('favs', []);
-  if (favs.length) html += '<h4>收藏</h4>' + favs.map(p => `<div data-path="${esc(p)}" data-fav="1" title="${esc(p)}">⭐ ${esc(baseName(p))}</div>`).join('');
-  html += '<h4>此电脑</h4><div data-path="">💻 此电脑</div>' + [...drives.values()].map(d => `<div data-path="${esc(d.p)}">💽 ${esc(labelOf(d.p))}</div>`).join('');
+  if (favs.length) html += '<h4>收藏</h4>' + favs.map(p => `<div data-path="${esc(p)}" data-fav="1" title="${esc(p)}">${ic('star')}<span>${esc(baseName(p))}</span></div>`).join('');
+  html += `<h4>此电脑</h4><div data-path="">${pcIco()}<span>此电脑</span></div>` + [...drives.values()].map(d => `<div data-path="${esc(d.p)}">${driveIco()}<span>${esc(labelOf(d.p))}</span></div>`).join('');
   sideEl.innerHTML = html;
   renderStatus();
 }
@@ -194,9 +195,9 @@ sideEl.addEventListener('contextmenu', e => {
   if (!d) return;
   const p = d.dataset.path, favs = store.get('favs', []);
   showMenu(e, [
-    ['🗂️ 在新标签中打开', () => openTab(p)],
-    ['◫ 在另一侧分屏中打开', () => openOther(ap, p)],
-    ...(d.dataset.fav ? [null, ['✕ 从收藏中移除', () => { store.set('favs', favs.filter(x => !same(x, p))); renderSide(); }]] : []),
+    ['在新标签中打开', () => openTab(p), '', 'tabPlus'],
+    ['在另一侧分屏中打开', () => openOther(ap, p), '', 'splitH'],
+    ...(d.dataset.fav ? [null, ['从收藏中移除', () => { store.set('favs', favs.filter(x => !same(x, p))); renderSide(); }, '', 'x']] : []),
   ]);
 });
 function addFav(p) {
@@ -222,6 +223,11 @@ sideEl.addEventListener('drop', e => {
 (async function boot() {
   document.body.classList.toggle('dark', settings.dark);
   app.classList.toggle('noside', !settings.side);
+  $('#brand').innerHTML = LOGO + 'Strata';
+  for (const [l, name] of [['', 'single'], ['h', 'splitH'], ['v', 'splitV']]) $('.tool [data-l="' + l + '"]').innerHTML = ic(name);
+  $('.tool [onclick="toggleSide()"]').innerHTML = ic('sidebar');
+  $('.tool [onclick^="setTheme"]').innerHTML = ic('theme');
+  $('.tool [onclick="showHelp()"]').innerHTML = ic('keyboard');
   $('#hidbtn').classList.toggle('on', settings.hidden);
   const [kf, dv] = await Promise.all([invoke('known_folders'), invoke('list_drives')]);
   for (const f of kf) {
@@ -247,7 +253,7 @@ sideEl.addEventListener('drop', e => {
 })();
 
 // 快捷键说明（工具栏“？”或 F1）
-const HELP = `<div class="dlg-in"><b>DirApp 快捷键</b><span class="x" data-a="x">✕</span>
+const HELP = `<div class="dlg-in"><b>快捷键</b><span class="x" data-a="x">${ic('x')}</span>
 <table><tr><th colspan="2">多开</th></tr>
 <tr><td>Ctrl+T / Ctrl+W</td><td>新建 / 关闭标签</td></tr><tr><td>Ctrl+Shift+T</td><td>恢复刚关闭的标签</td></tr>
 <tr><td>Ctrl+Tab / Ctrl+1…9</td><td>切换标签</td></tr><tr><td>Ctrl+\</td><td>左右分屏 / 取消分屏</td></tr>

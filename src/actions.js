@@ -64,7 +64,7 @@ async function setClip(t, cut) {
     toast(`${what}，可在其他标签、分屏或资源管理器中粘贴`);
   } catch {
     localClip = { paths, cut };
-    toast(`${what}（系统剪贴板被其他程序占用，只能在 DirApp 内粘贴）`, 4000);
+    toast(`${what}（系统剪贴板被其他程序占用，只能在 Strata 内粘贴）`, 4000);
   }
 }
 

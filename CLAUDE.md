@@ -1,11 +1,12 @@
-# DirApp 开发说明（给 Claude Code 和开发者）
+# Strata 开发说明（给 Claude Code 和开发者）
 
 Windows 文件管理器：多标签、左右/上下分屏、多窗口，每个标签里都能搜索。Tauri 2，Rust 后端 + 原生 HTML/JS 前端（无框架、无打包工具）。功能和搜索语法见 README.md。
 
 ## 代码结构
 
 前端 `src/`，按顺序以普通 `<script>` 加载，共用全局变量：
-- `util.js` 工具函数、`store`（localStorage）、`settings`
+- `icons.js` 图标（线条图标 `ic()`、彩色文件图标 `fileIco()` / `folderIco()` / `driveIco()` / `pcIco()`、标志 `LOGO`）
+- `util.js` 工具函数、`store`（localStorage，键前缀 `dirapp.`）、`settings`
 - `search.js` 筛选和搜索语法（前端部分）、拼音首字母
 - `ui.js` 状态（`panes`、`ap`、`layout`）、渲染、虚拟滚动、分屏和分隔条、会话保存
 - `events.js` 鼠标事件：点击、双击、中键、拖放
@@ -24,7 +25,7 @@ Windows 文件管理器：多标签、左右/上下分屏、多窗口，每个�
 
 - Git Bash 里构建时，必须把 MSVC 的 `bin/Hostx64/x64` 放到 PATH 最前面，否则会用到 `/usr/bin/link.exe`，链接失败。
 - 前端打包在 exe 里，改了 JS/CSS 也要重新构建。调试用 `npx tauri build --debug --no-bundle`（几秒），安装包用 `npx tauri build`。
-- 构建前先关掉正在运行的 dirapp.exe，否则 exe 被占用，写不进去。
+- 构建前先关掉正在运行的 strata.exe，否则 exe 被占用，写不进去。
 - `cd src-tauri && cargo test` 跑搜索语法测试。
 
 ## 测试方法
@@ -43,9 +44,17 @@ Windows 文件管理器：多标签、左右/上下分屏、多窗口，每个�
 
 已完成并用真实输入测过：多标签/固定/恢复、分屏和拖动调整大小（左右、上下各存一个比例，双击分隔条复位）、分屏合并回单屏（另一侧与这边路径相同的标签不重复添加，固定的标签保留）、标签移到新窗口、会话恢复、虚拟滚动、全部搜索语法、复制/移动/撤销/回收站、拖放（分屏之间、到文件夹、到标签、到侧栏收藏）、打开文件（含无关联程序时弹“打开方式”、属性窗口）。
 
-还没实测：和资源管理器互相复制粘贴文件（测试时系统剪贴板一直被别的程序占用）。系统剪贴板被占用时会退回到 DirApp 内部剪贴板。
+还没实测：和资源管理器互相复制粘贴文件（测试时系统剪贴板一直被别的程序占用）。系统剪贴板被占用时会退回到 Strata 内部剪贴板。
 
-还没做：系统原生右键菜单、真实文件图标（现在是 emoji）、和资源管理器互相拖放、Everything 搜索后端。
+还没做：系统原生右键菜单、真实文件图标（现在是内联 SVG）、和资源管理器互相拖放、Everything 搜索后端。
+
+## 名字与标识
+
+产品名 **Strata**（2026-11-25 从 DirApp 改名）。只改了显示名：窗口标题、安装包名、界面左上角、提示文字。以下保持不变，改了会丢用户数据或和已发布的安装包对不上：
+- `identifier` `dev.haozhen.dirapp`（决定应用数据目录和 WebView2 用户数据目录，localStorage 存在里面）
+- localStorage 键前缀 `dirapp.`
+- Cargo 包名 `dirapp`（exe 文件名 `dirapp.exe`，安装包文件名 `DirApp_0.1.0_x64-setup.exe`）
+- 前端拖放标记 `text/plain = dirapp`
 
 ## 约定
 

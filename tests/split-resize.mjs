@@ -13,7 +13,7 @@ const dragSplit = async (x, y, steps = 10) => {
   await c.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   await c.sleep(150);
 };
-await c.eval(`localStorage.clear(); delete settings.split; split(null); panes[0].tabs = [mkTab(${J(T + '\\大目录')})]; panes[0].act = 0; renderAll(); load(cur(0)); split('h'); nav(cur(1), ${J(T)}); 1`);
+await c.eval(`Object.keys(localStorage).filter(k=>k.startsWith("dirapp.")).forEach(k=>localStorage.removeItem(k)); delete settings.split; split(null); panes[0].tabs = [mkTab(${J(T + '\\大目录')})]; panes[0].act = 0; renderAll(); load(cur(0)); split('h'); nav(cur(1), ${J(T)}); 1`);
 await c.sleep(700);
 
 let g = await geo();
@@ -58,5 +58,5 @@ await c.eval(`split('h'); 1`); await c.sleep(200);
 await c.dbl('.pane[data-p="1"] tr.row', '文档');
 ok('调整后双击打开仍正常', (await c.eval(`cur(1).path`)).endsWith('文档'), await c.eval(`cur(1).path`));
 console.log('logs', J(c.logs));
-await c.eval(`localStorage.clear(); 1`);
+await c.eval(`Object.keys(localStorage).filter(k=>k.startsWith("dirapp.")).forEach(k=>localStorage.removeItem(k)); 1`);
 c.close();

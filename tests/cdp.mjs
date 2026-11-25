@@ -50,7 +50,7 @@ export async function connect(match = '') {
       await sleep(120);
     },
     async type(s) { await send('Input.insertText', { text: s }); await sleep(150); },
-    async shot(file) { const r = await send('Page.captureScreenshot', { format: 'png' }); (await import('fs')).writeFileSync(file, Buffer.from(r.result.data, 'base64')); },
+    async shot(file, clip) { const r = await send('Page.captureScreenshot', { format: 'png', ...(clip ? { clip } : {}) }); const data = r.result?.data ?? r.data; if (!data) throw new Error('no screenshot data: ' + JSON.stringify(r).slice(0, 300)); (await import('fs')).writeFileSync(file, Buffer.from(data, 'base64')); },
     close: () => ws.close(),
   };
   return c;

@@ -18,7 +18,7 @@ async fn open_window(app: tauri::AppHandle, query: String) -> Result<(), String>
     }
     let label = format!("w{}", NEXT_WIN.fetch_add(1, Ordering::Relaxed));
     WebviewWindowBuilder::new(&app, label, WebviewUrl::App(format!("index.html?{query}").into()))
-        .title("DirApp")
+        .title("Strata")
         .inner_size(1100.0, 720.0)
         .min_inner_size(480.0, 360.0)
         .disable_drag_drop_handler() // 让网页自己处理拖放（标签、文件拖动）

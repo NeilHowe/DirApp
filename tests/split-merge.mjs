@@ -7,7 +7,7 @@ const st = () => c.eval(`JSON.stringify({ layout, ap, panes: panes.map(P => ({ a
 const btn = l => c.click(`.tool [data-l="${l}"]`);
 const names = s => s.panes.map(P => P.tabs.join(',')).join(' | ');
 
-await c.eval(`localStorage.clear(); split(null); panes[0].tabs = [mkTab(${J(T)})]; panes[0].act = 0; renderAll(); load(cur(0)); 1`);
+await c.eval(`Object.keys(localStorage).filter(k=>k.startsWith("dirapp.")).forEach(k=>localStorage.removeItem(k)); split(null); panes[0].tabs = [mkTab(${J(T)})]; panes[0].act = 0; renderAll(); load(cur(0)); 1`);
 await c.sleep(500);
 
 for (const l of ['h', 'v']) {
@@ -56,5 +56,5 @@ await btn('');
 s = await st();
 ok('多个标签合并：重复的去掉，其余按顺序保留', names(s) === expect, names(s) + ' 期望 ' + expect + '（合并前右侧 ' + before.panes[1].tabs.join(',') + '）');
 console.log('logs', J(c.logs));
-await c.eval(`localStorage.clear(); 1`);
+await c.eval(`Object.keys(localStorage).filter(k=>k.startsWith("dirapp.")).forEach(k=>localStorage.removeItem(k)); 1`);
 c.close();

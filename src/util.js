@@ -37,35 +37,36 @@ const within = (p, dir) => dir === ROOT || same(p, dir) || p.toLowerCase().start
 const baseName = p => p === ROOT ? '此电脑' : isDrive(p) ? p.slice(0, 2) : p.slice(p.lastIndexOf('\\') + 1);
 const joinPath = (dir, name) => (isDrive(dir) ? dir : dir + '\\') + name;
 
-// 常用文件夹和磁盘名称（启动时从后端取）
-const KNOWN_LABEL = { desktop: ['桌面', '🖥️'], downloads: ['下载', '⬇️'], documents: ['文档', '📄'], pictures: ['图片', '🖼️'], music: ['音乐', '🎵'], videos: ['视频', '🎬'], home: ['主文件夹', '🏠'] };
-const known = new Map();    // 小写路径 → [名称, 图标]
+// 常用文件夹和磁盘名称（启动时从后端取）；第三项是文件夹图标上的小图形（icons.js 的 LINE 名称）
+const KNOWN_LABEL = { desktop: ['桌面', 'desktop'], downloads: ['下载', 'downloads'], documents: ['文档', 'documents'], pictures: ['图片', 'pictures'], music: ['音乐', 'music'], videos: ['视频', 'videos'], home: ['主文件夹', 'home'] };
+const known = new Map();    // 小写路径 → [名称, 图形]
 const drives = new Map();   // 'C:\' → 磁盘项
 function labelOf(p) {
   if (p === ROOT) return '此电脑';
   if (isDrive(p)) { const d = drives.get(p); return `${d?.label || '本地磁盘'} (${p.slice(0, 2)})`; }
   return known.get(p.toLowerCase())?.[0] || baseName(p);
 }
-const dirIcon = p => p === ROOT ? '💻' : isDrive(p) ? '💽' : known.get(p.toLowerCase())?.[1] || '📁';
+const glyphOf = p => known.get(p.toLowerCase())?.[1];
+const dirIcon = p => p === ROOT ? pcIco() : isDrive(p) ? driveIco() : folderIco(glyphOf(p));
 const displayPath = p => p === ROOT ? '此电脑' : p;
 
-const TYPES = {
-  docx: ['Word 文档', '📝'], doc: ['Word 文档', '📝'], xlsx: ['Excel 工作表', '📊'], xls: ['Excel 工作表', '📊'], csv: ['CSV 文件', '📊'],
-  pptx: ['PowerPoint 演示文稿', '📽️'], ppt: ['PowerPoint 演示文稿', '📽️'], pdf: ['PDF 文件', '📕'],
-  png: ['PNG 图片', '🖼️'], jpg: ['JPG 图片', '🖼️'], jpeg: ['JPEG 图片', '🖼️'], gif: ['GIF 图片', '🖼️'], webp: ['WebP 图片', '🖼️'], bmp: ['BMP 图片', '🖼️'], svg: ['SVG 图像', '🖼️'], ico: ['图标', '🖼️'], psd: ['Photoshop 文件', '🎨'], fig: ['Figma 文件', '🎨'],
-  md: ['Markdown 文档', '📄'], txt: ['文本文档', '📄'], log: ['日志文件', '📄'], ini: ['配置设置', '⚙️'], cfg: ['配置文件', '⚙️'],
-  exe: ['应用程序', '⚙️'], msi: ['Windows 安装包', '📦'], dll: ['应用程序扩展', '🧩'], sys: ['系统文件', '🧩'], lnk: ['快捷方式', '🔗'], url: ['Internet 快捷方式', '🔗'],
-  zip: ['压缩文件', '🗜️'], '7z': ['7Z 压缩文件', '🗜️'], rar: ['RAR 压缩文件', '🗜️'], gz: ['GZ 压缩文件', '🗜️'], tar: ['TAR 归档文件', '🗜️'], iso: ['光盘映像', '💿'],
-  mp3: ['MP3 音频', '🎵'], wav: ['WAV 音频', '🎵'], flac: ['FLAC 音频', '🎵'], m4a: ['M4A 音频', '🎵'], mp4: ['MP4 视频', '🎬'], mkv: ['MKV 视频', '🎬'], avi: ['AVI 视频', '🎬'], mov: ['MOV 视频', '🎬'],
-  ttf: ['TrueType 字体', '🔤'], otf: ['OpenType 字体', '🔤'],
-  js: ['JavaScript 文件', '📜'], ts: ['TypeScript 文件', '📜'], tsx: ['TSX 文件', '📜'], jsx: ['JSX 文件', '📜'], json: ['JSON 文件', '📜'], cs: ['C# 源文件', '📜'], py: ['Python 文件', '📜'],
-  rs: ['Rust 文件', '📜'], go: ['Go 文件', '📜'], java: ['Java 文件', '📜'], c: ['C 源文件', '📜'], cpp: ['C++ 源文件', '📜'], h: ['头文件', '📜'], lua: ['Lua 文件', '📜'],
-  toml: ['TOML 文件', '📜'], yaml: ['YAML 文件', '📜'], yml: ['YAML 文件', '📜'], xml: ['XML 文件', '📜'], cmd: ['Windows 命令脚本', '📜'], bat: ['Windows 批处理文件', '📜'], ps1: ['PowerShell 脚本', '📜'], sh: ['Shell 脚本', '📜'],
-  html: ['HTML 文档', '🌐'], htm: ['HTML 文档', '🌐'], css: ['CSS 样式表', '📜'], sln: ['VS 解决方案', '🧰'], csproj: ['C# 项目文件', '🧰'],
+const TYPES = {   // 扩展名 → [类型名称, 图标类别]
+  docx: ['Word 文档', 'doc'], doc: ['Word 文档', 'doc'], xlsx: ['Excel 工作表', 'sheet'], xls: ['Excel 工作表', 'sheet'], csv: ['CSV 文件', 'sheet'],
+  pptx: ['PowerPoint 演示文稿', 'slide'], ppt: ['PowerPoint 演示文稿', 'slide'], pdf: ['PDF 文件', 'pdf'],
+  png: ['PNG 图片', 'image'], jpg: ['JPG 图片', 'image'], jpeg: ['JPEG 图片', 'image'], gif: ['GIF 图片', 'image'], webp: ['WebP 图片', 'image'], bmp: ['BMP 图片', 'image'], svg: ['SVG 图像', 'image'], ico: ['图标', 'image'], psd: ['Photoshop 文件', 'design'], fig: ['Figma 文件', 'design'],
+  md: ['Markdown 文档', 'text'], txt: ['文本文档', 'text'], log: ['日志文件', 'text'], ini: ['配置设置', 'config'], cfg: ['配置文件', 'config'],
+  exe: ['应用程序', 'exe'], msi: ['Windows 安装包', 'exe'], dll: ['应用程序扩展', 'config'], sys: ['系统文件', 'config'], lnk: ['快捷方式', 'link'], url: ['Internet 快捷方式', 'link'],
+  zip: ['压缩文件', 'archive'], '7z': ['7Z 压缩文件', 'archive'], rar: ['RAR 压缩文件', 'archive'], gz: ['GZ 压缩文件', 'archive'], tar: ['TAR 归档文件', 'archive'], iso: ['光盘映像', 'disc'],
+  mp3: ['MP3 音频', 'audio'], wav: ['WAV 音频', 'audio'], flac: ['FLAC 音频', 'audio'], m4a: ['M4A 音频', 'audio'], mp4: ['MP4 视频', 'video'], mkv: ['MKV 视频', 'video'], avi: ['AVI 视频', 'video'], mov: ['MOV 视频', 'video'],
+  ttf: ['TrueType 字体', 'font'], otf: ['OpenType 字体', 'font'],
+  js: ['JavaScript 文件', 'code'], ts: ['TypeScript 文件', 'code'], tsx: ['TSX 文件', 'code'], jsx: ['JSX 文件', 'code'], json: ['JSON 文件', 'code'], cs: ['C# 源文件', 'code'], py: ['Python 文件', 'code'],
+  rs: ['Rust 文件', 'code'], go: ['Go 文件', 'code'], java: ['Java 文件', 'code'], c: ['C 源文件', 'code'], cpp: ['C++ 源文件', 'code'], h: ['头文件', 'code'], lua: ['Lua 文件', 'code'],
+  toml: ['TOML 文件', 'code'], yaml: ['YAML 文件', 'code'], yml: ['YAML 文件', 'code'], xml: ['XML 文件', 'code'], cmd: ['Windows 命令脚本', 'code'], bat: ['Windows 批处理文件', 'code'], ps1: ['PowerShell 脚本', 'code'], sh: ['Shell 脚本', 'code'],
+  html: ['HTML 文档', 'web'], htm: ['HTML 文档', 'web'], css: ['CSS 样式表', 'code'], sln: ['VS 解决方案', 'config'], csproj: ['C# 项目文件', 'config'],
 };
 const ext = name => { const i = name.lastIndexOf('.'); return i > 0 ? name.slice(i + 1).toLowerCase() : ''; };
 const typeOf = it => it.k === 'drive' ? '本地磁盘' : it.d ? '文件夹' : (TYPES[ext(it.n)]?.[0] || (ext(it.n) ? ext(it.n).toUpperCase() + ' 文件' : '文件'));
-const iconOf = it => it.k === 'drive' ? '💽' : it.d ? dirIcon(it.p) : (TYPES[ext(it.n)]?.[1] || '📄');
+const iconOf = it => it.k === 'drive' ? driveIco() : it.d ? dirIcon(it.p) : fileIco(TYPES[ext(it.n)]?.[1]);
 const itemLabel = it => it.k === 'drive' ? `${it.label} (${it.n})` : it.n;
 
 const fmtSize = b => b < 1024 ? b + ' B' : b < 1048576 ? Math.ceil(b / 1024).toLocaleString() + ' KB' : b < 1073741824 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1073741824).toFixed(b < 107374182400 ? 2 : 1) + ' GB';

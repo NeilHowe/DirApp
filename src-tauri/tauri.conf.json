@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "DirApp",
+  "productName": "Strata",
   "version": "0.1.0",
   "identifier": "dev.haozhen.dirapp",
   "build": {
@@ -9,7 +9,7 @@
   "app": {
     "windows": [
       {
-        "title": "DirApp",
+        "title": "Strata",
         "width": 1200,
         "height": 760,
         "minWidth": 480,

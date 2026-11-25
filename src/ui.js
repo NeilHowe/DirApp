@@ -116,10 +116,11 @@ const SKEL = `<div class="tabs"></div>
 <div class="list" tabindex="0"></div>`;
 
 function renderAll() {
-  const els = panesEl.children;
+  const els = [...panesEl.querySelectorAll(':scope > .pane')];
   if (els.length !== panes.length || panes.some((p, i) => p.el !== els[i])) {   // 分屏结构变了：重建骨架
     panesEl.innerHTML = '';
-    panes.forEach(P => {
+    panes.forEach((P, i) => {
+      if (i) panesEl.append(Object.assign(document.createElement('div'), { className: 'splitter', title: '拖动调整大小，双击恢复一半' }));
       P.el = document.createElement('div');
       P.el.className = 'pane';
       P.el.innerHTML = SKEL;
@@ -128,11 +129,58 @@ function renderAll() {
     });
   }
   panesEl.className = 'panes' + (layout === 'v' ? ' v' : '');
+  applySplit();
   panes.forEach((P, i) => { P.el.dataset.p = i; renderPane(i); });
   renderStatus();
   syncWatch();
   saveSession();
 }
+
+// 分屏比例：左右、上下各记一个，保存在设置里
+const MIN_PANE = { h: 260, v: 150 };   // 每个分屏的最小宽度 / 高度（px）
+function splitRatio() { return settings.split?.[layout === 'v' ? 'v' : 'h'] ?? 0.5; }
+function applySplit(r = splitRatio()) {
+  if (panes.length < 2) { panes[0].el.style.flex = ''; return; }
+  panes[0].el.style.flex = `${r} 1 0`;
+  panes[1].el.style.flex = `${1 - r} 1 0`;
+}
+function clampRatio(r) {
+  const rect = panesEl.getBoundingClientRect(), sp = $('.splitter', panesEl)?.getBoundingClientRect() || { width: 0, height: 0 };
+  const v = layout === 'v', total = (v ? rect.height - sp.height : rect.width - sp.width), min = MIN_PANE[v ? 'v' : 'h'];
+  if (total < min * 2) return 0.5;
+  return Math.min(1 - min / total, Math.max(min / total, r));
+}
+function setSplit(r) {
+  settings.split = { ...settings.split, [layout === 'v' ? 'v' : 'h']: r };
+  saveSettings();
+  applySplit(r);
+}
+panesEl.addEventListener('pointerdown', e => {
+  const sp = e.target.closest('.splitter');
+  if (!sp || e.button !== 0) return;
+  e.preventDefault();
+  sp.setPointerCapture(e.pointerId);
+  sp.classList.add('on');
+  document.body.classList.add(layout === 'v' ? 'resizing-v' : 'resizing-h');
+  const rect = panesEl.getBoundingClientRect(), half = sp.getBoundingClientRect()[layout === 'v' ? 'height' : 'width'] / 2;
+  let r = splitRatio();
+  const move = ev => {
+    r = clampRatio(layout === 'v' ? (ev.clientY - rect.top - half) / (rect.height - half * 2) : (ev.clientX - rect.left - half) / (rect.width - half * 2));
+    applySplit(r);
+  };
+  const up = () => {
+    sp.removeEventListener('pointermove', move);
+    sp.classList.remove('on');
+    document.body.classList.remove('resizing-v', 'resizing-h');
+    setSplit(r);
+  };
+  sp.addEventListener('pointermove', move);
+  sp.addEventListener('pointerup', up, { once: true });
+  sp.addEventListener('lostpointercapture', up, { once: true });
+});
+panesEl.addEventListener('dblclick', e => { if (e.target.closest('.splitter')) setSplit(0.5); });
+// 分屏或窗口大小变化后，补渲染虚拟列表新露出来的行
+new ResizeObserver(() => panes.forEach(P => P.el && renderRows(P, false))).observe(panesEl);
 
 function refresh(t, full, reset) {
   const pi = panes.findIndex(p => p.tabs.includes(t));

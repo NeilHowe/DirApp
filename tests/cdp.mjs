@@ -42,8 +42,8 @@ export async function connect(match = '') {
     async dbl(sel, text) { const p = await c.pos(sel, text); await c.mouse(p.x, p.y, { count: 2 }); await sleep(400); },
     // mods：1=Alt 2=Ctrl 4=Meta 8=Shift，可相加
     async key(key, mods = 0) {
-      const code = key.length === 1 ? 'Key' + key.toUpperCase() : key;
-      const vk = { Enter: 13, Escape: 27, Delete: 46, Backspace: 8, F2: 113, F5: 116, ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39, Tab: 9, Home: 36, End: 35 }[key] || key.toUpperCase().charCodeAt(0);
+      const code = key === '\\' ? 'Backslash' : key.length === 1 ? 'Key' + key.toUpperCase() : key;
+      const vk = { Enter: 13, Escape: 27, Delete: 46, Backspace: 8, F2: 113, F5: 116, ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39, Tab: 9, Home: 36, End: 35, '\\': 220 }[key] || key.toUpperCase().charCodeAt(0);
       const text = key.length === 1 && !(mods & 3) ? key : undefined;
       await send('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', key, code, windowsVirtualKeyCode: vk, modifiers: mods, text });
       await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, modifiers: mods });

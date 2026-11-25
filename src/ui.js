@@ -85,10 +85,23 @@ function split(mode) {
   const keep = cur();
   if (mode && panes.length === 1) { const t = mkTab(keep.path); panes.push({ tabs: [t], act: 0 }); load(t); }
   if (!mode && panes.length > 1) {
-    const [a, b] = panes;
-    a.tabs.push(...b.tabs);
+    // 合并回单屏：另一侧和这边打开同一文件夹的标签不再重复添加（固定的标签保留），
+    // 否则每次“分屏 → 单屏”都会多出一个标签
+    const [a, b] = panes, key = t => t.path.toLowerCase();
+    const open = new Map(a.tabs.map(t => [key(t), t]));
+    let act = keep;
+    for (const t of b.tabs) {
+      const same = open.get(key(t));
+      if (same && !t.pin) {
+        stopSearch(t);
+        if (t === keep) act = same;
+      } else { a.tabs.push(t); open.set(key(t), t); }
+    }
     panes.length = 1;
-    a.act = a.tabs.indexOf(keep);
+    a.act = Math.max(0, a.tabs.indexOf(act));
+    ap = 0;
+    layout = null;
+    return renderAll();
   }
   layout = mode;
   ap = Math.max(0, panes.findIndex(p => p.tabs.includes(keep)));

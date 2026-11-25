@@ -2,37 +2,67 @@
 const $ = (s, el = document) => el.querySelector(s);
 const app = $('#app'), panesEl = $('#panes'), statusEl = $('#status'), sideEl = $('#side');
 const coll = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
-let panes = [], ap = 0, layout = null, closed = [], uid = 0;
+const ROW_H = 26;   // 列表行高（虚拟滚动按固定行高计算）
+let panes = [], ap = 0, layout = null, closed = [], uid = 0, renaming = null;
 
-const mkTab = node => ({ id: ++uid, node, back: [], fwd: [], q: '', rec: false, sort: { k: 'n', a: 1 }, sel: new Set(), anchor: null, res: null, job: null, scanned: 0, ms: 0, view: [] });
+const mkTab = (path, o = {}) => ({ id: ++uid, path, items: null, loading: false, err: null, back: [], fwd: [], q: '', rec: false,
+  sort: { k: 'n', a: 1 }, sel: new Set(), anchor: null, res: null, job: null, scanned: 0, ms: 0, view: [], ...o });
 const cur = (pi = ap) => panes[pi].tabs[panes[pi].act];
 const paneOf = t => panes.findIndex(p => p.tabs[p.act] === t);
+const allTabs = () => panes.flatMap(p => p.tabs);
 
-function openTab(node, pi = ap, activate = true, at) {
-  const P = panes[pi], prev = P.tabs[P.act], t = mkTab(node);
+// 读取目录内容。keep=true 时保留选择（目录变化后的自动刷新）
+async function load(t, keep) {
+  const seq = t.loadSeq = (t.loadSeq || 0) + 1, path = t.path;
+  t.loading = true;
+  if (!keep) refresh(t, true, true);
+  let items, err = null;
+  try { items = path === ROOT ? await invoke('list_drives') : await invoke('list_dir', { path }); }
+  catch (e) { items = []; err = e; }
+  if (t.loadSeq !== seq || t.path !== path) return;   // 期间已切到别的目录
+  if (path === ROOT) { drives.clear(); items.forEach(d => drives.set(d.p, d)); }
+  Object.assign(t, { items, err, loading: false });
+  const has = new Set(items.map(x => x.p.toLowerCase()));
+  for (const p of t.sel) if (!has.has(p.toLowerCase())) t.sel.delete(p);
+  refresh(t, true, !keep);
+  if (t.reveal) { scrollToPath(t, t.reveal); t.reveal = null; }
+}
+
+function openTab(path, pi = ap, activate = true, at) {
+  const P = panes[pi], prev = P.tabs[P.act], t = mkTab(path);
   P.tabs.splice(at ?? P.act + 1, 0, t);          // 新标签插在当前标签右侧
   P.act = P.tabs.indexOf(activate ? t : prev);
   if (activate) ap = pi;
   renderAll();
+  load(t);
   return t;
+}
+
+function activate(pi, ti) {
+  const P = panes[pi];
+  P.act = ti;
+  ap = pi;
+  renderAll();
+  const t = cur(pi);
+  if (!t.items || !t.job) load(t, !!t.items);   // 切回来时顺便刷新一下（后台标签不监听目录变化）
 }
 
 function closeTab(pi, ti) {
   const P = panes[pi], t = P.tabs[ti];
   if (!t) return;
   stopSearch(t);
-  closed.push(t.node);
+  closed.push(t.path);
   const prev = P.tabs[P.act];
   P.tabs.splice(ti, 1);
   if (!P.tabs.length) {
     if (panes.length > 1) { panes.splice(pi, 1); layout = null; ap = 0; }
-    else { P.tabs.push(mkTab(ROOT)); P.act = 0; }
+    else { P.tabs.push(mkTab(ROOT)); P.act = 0; load(P.tabs[0]); }
   } else P.act = prev === t ? Math.min(ti, P.tabs.length - 1) : P.tabs.indexOf(prev);
   renderAll();
 }
 
 function reopen() {
-  while (closed.length) { const n = closed.pop(); if (attached(n)) return openTab(n); }
+  if (closed.length) return openTab(closed.pop());
   toast('没有可恢复的标签');
 }
 
@@ -45,7 +75,7 @@ function moveTab(fp, fi, tp, ti) {
   T.act = ti;
   ap = tp;
   if (fp !== tp) {
-    if (!F.tabs.length) { panes.splice(fp, 1); layout = null; ap = 0; }
+    if (!F.tabs.length) { panes.splice(fp, 1); layout = null; ap = Math.max(0, panes.indexOf(T)); }
     else F.act = keep === t ? Math.min(fi, F.tabs.length - 1) : F.tabs.indexOf(keep);
   }
   renderAll();
@@ -53,7 +83,7 @@ function moveTab(fp, fi, tp, ti) {
 
 function split(mode) {
   const keep = cur();
-  if (mode && panes.length === 1) panes.push({ tabs: [mkTab(resolve('C:\\Users\\me\\下载'))], act: 0 });
+  if (mode && panes.length === 1) { const t = mkTab(keep.path); panes.push({ tabs: [t], act: 0 }); load(t); }
   if (!mode && panes.length > 1) {
     const [a, b] = panes;
     a.tabs.push(...b.tabs);
@@ -65,117 +95,168 @@ function split(mode) {
   renderAll();
 }
 
-function nav(t, node, how = 'push', select) {
-  if (!node?.d) return;
+function nav(t, path, how = 'push', select) {
+  if (path == null) return;
+  path = path === ROOT ? ROOT : norm(path);
   stopSearch(t);
-  if (how === 'push' && node !== t.node) { t.back.push(t.node); t.fwd = []; }
-  Object.assign(t, { node, q: '', res: null, cancelled: false, anchor: select || null, sel: new Set(select ? [select] : []) });
-  refresh(t, true, true);
-  if (select) scrollToNode(t, select);
+  if (how === 'push' && !same(path, t.path)) { t.back.push(t.path); t.fwd = []; }
+  Object.assign(t, { path, items: null, err: null, q: '', res: null, cancelled: false, anchor: select || null, sel: new Set(select ? [select] : []), reveal: select || null });
+  renderAll();
+  load(t);
 }
-const goBack = t => t.back.length && (t.fwd.push(t.node), nav(t, t.back.pop(), 'hist'));
-const goFwd = t => t.fwd.length && (t.back.push(t.node), nav(t, t.fwd.pop(), 'hist'));
-const goUp = t => t.node.p && nav(t, t.node.p, 'push', t.node);   // 回到上级时选中刚才所在的文件夹
+const goBack = t => t.back.length && (t.fwd.push(t.path), nav(t, t.back.pop(), 'hist'));
+const goFwd = t => t.fwd.length && (t.back.push(t.path), nav(t, t.fwd.pop(), 'hist'));
+const goUp = t => t.path !== ROOT && nav(t, parentOf(t.path), 'push', t.path);   // 回到上级时选中刚才所在的文件夹
 
 const SKEL = `<div class="tabs"></div>
 <div class="bar"><button class="btn" data-a="back" title="后退 (Alt+←)">←</button><button class="btn" data-a="fwd" title="前进 (Alt+→)">→</button><button class="btn" data-a="up" title="上一级 (Alt+↑)">↑</button><button class="btn hide-n" data-a="refresh" title="刷新 (F5)">⟳</button>
 <div class="crumb" title="点击空白处编辑路径 (Ctrl+L)"></div>
 <div class="search"><span class="ic">🔍</span><input spellcheck="false"><span class="mode" data-a="mode" title="切换：只筛选当前文件夹 / 搜索所有子文件夹 (Ctrl+Shift+F)">子目录</span>
-<div class="help"><b>搜索语法</b>（可组合，空格分隔）<br><code>report</code> 名称包含<br><code>bg</code> 拼音首字母（报告）<br><code>*.png</code> <code>IMG_10?5*</code> 通配符<br><code>ext:pdf,docx</code> 扩展名<br><code>size:&gt;5mb</code> 大小<br><code>modified:7d</code> 7 天内修改<br><code>type:folder</code> 只看文件夹<br><code>/^IMG_\\d+/</code> 正则<br><span class="dim">Enter：在所有子文件夹中搜索</span></div></div></div>
+<div class="help"><b>搜索语法</b>（可组合，空格分隔）<br><code>report</code> 名称包含<br><code>bg</code> 拼音首字母（报告）<br><code>*.png</code> <code>IMG_10?5*</code> 通配符<br><code>ext:pdf,docx</code> 扩展名<br><code>size:&gt;5mb</code> 大小<br><code>modified:7d</code> 7 天内修改<br><code>type:folder</code> 只看文件夹<br><code>/^IMG_\\d+/</code> 正则<br><code>content:关键字</code> 文件内容（子目录搜索）<br><span class="dim">Enter：在所有子文件夹中搜索</span></div></div></div>
 <div class="list" tabindex="0"></div>`;
 
 function renderAll() {
   const els = panesEl.children;
   if (els.length !== panes.length || panes.some((p, i) => p.el !== els[i])) {   // 分屏结构变了：重建骨架
-    panesEl.className = 'panes' + (layout === 'v' ? ' v' : '');
     panesEl.innerHTML = '';
-    panes.forEach((P, i) => {
+    panes.forEach(P => {
       P.el = document.createElement('div');
       P.el.className = 'pane';
       P.el.innerHTML = SKEL;
+      $('.list', P.el).addEventListener('scroll', () => onListScroll(P));
       panesEl.append(P.el);
     });
   }
   panesEl.className = 'panes' + (layout === 'v' ? ' v' : '');
   panes.forEach((P, i) => { P.el.dataset.p = i; renderPane(i); });
   renderStatus();
+  syncWatch();
+  saveSession();
 }
 
 function refresh(t, full, reset) {
   const pi = panes.findIndex(p => p.tabs.includes(t));
-  if (pi < 0 || (cur(pi) !== t && !full)) return;   // 后台标签只在结束时刷新一下标签图标
-  renderPane(pi, reset);
+  if (pi < 0) return;
+  if (cur(pi) !== t) { if (full) renderTabs(pi); return; }   // 后台标签只更新标签栏
+  if (full) renderPane(pi, reset); else renderList(pi);
   if (pi === ap) renderStatus();
+}
+
+function renderTabs(pi) {
+  const P = panes[pi];
+  $('.tabs', P.el).innerHTML = P.tabs.map((x, i) => `<div class="tab${i === P.act ? ' on' : ''}${x.pin ? ' pin' : ''}" draggable="true" data-t="${i}" title="${esc(displayPath(x.path))}">${x.job || x.loading ? '⏳' : dirIcon(x.path)}${x.pin ? '' : `<span>${esc(x.rec && x.res ? `搜索“${x.q}”` : labelOf(x.path))}</span><i data-a="close" title="关闭 (Ctrl+W)">✕</i>`}</div>`).join('')
+    + '<div class="addtab" data-a="add" title="新建标签 (Ctrl+T)">＋</div>';
 }
 
 function renderPane(pi, reset) {
   const P = panes[pi], el = P.el, t = cur(pi);
   el.classList.toggle('act', pi === ap && panes.length > 1);
-  $('.tabs', el).innerHTML = P.tabs.map((x, i) => `<div class="tab${i === P.act ? ' on' : ''}${x.pin ? ' pin' : ''}" draggable="true" data-t="${i}" title="${esc(pathOf(x.node))}">${x.job ? '⏳' : iconOf(x.node)}${x.pin ? '' : `<span>${esc(x.rec && x.res ? `搜索“${x.q}”` : label(x.node))}</span><i data-a="close" title="关闭 (Ctrl+W)">✕</i>`}</div>`).join('')
-    + '<div class="addtab" data-a="add" title="新建标签 (Ctrl+T)">＋</div>';
+  renderTabs(pi);
   $('[data-a=back]', el).disabled = !t.back.length;
   $('[data-a=fwd]', el).disabled = !t.fwd.length;
-  $('[data-a=up]', el).disabled = !t.node.p;
+  $('[data-a=up]', el).disabled = t.path === ROOT;
   const cr = $('.crumb', el);
   if (!$('input', cr)) {
-    cr.innerHTML = [ROOT, ...chain(t.node)].map((n, k) => `<a data-k="${k}">${esc(label(n))}</a>`).join('<em>›</em>');
+    cr.innerHTML = [ROOT, ...chainOf(t.path)].map((p, k) => `<a data-k="${k}">${esc(k ? (isDrive(p) ? labelOf(p) : baseName(p)) : '💻 此电脑')}</a>`).join('<em>›</em>');
     cr.scrollLeft = 1e5;   // 路径太长时显示末尾
   }
   const inp = $('.search input', el);
   if (inp.value !== t.q) inp.value = t.q;
-  inp.placeholder = `${t.rec ? '搜索' : '筛选'}“${label(t.node)}”`;
+  inp.placeholder = `${t.rec ? '搜索' : '筛选'}“${labelOf(t.path)}”`;
   $('.mode', el).classList.toggle('r', t.rec);
   renderList(pi, reset);
 }
 
+const SORTERS = {
+  n: (x, y) => coll.compare(x.n, y.n), m: (x, y) => x.m - y.m, s: (x, y) => (x.s || 0) - (y.s || 0),
+  t: (x, y) => coll.compare(typeOf(x), typeOf(y)), l: (x, y) => coll.compare(x.p, y.p),
+};
 function getView(t) {
   let arr;
   if (t.rec && t.res) arr = t.res.slice();
   else {
     const test = t.q.trim() ? parseQ(t.q) : null;
     arr = [];
-    for (const n of t.node.c) { const hl = test ? test(n) : []; if (hl) arr.push({ n, hl }); }
+    for (const it of t.items || []) {
+      if (it.h && !settings.hidden) continue;
+      const hl = test ? test(it) : [];
+      if (hl) arr.push({ it, hl });
+    }
   }
-  const { k, a } = t.sort, f = {
-    n: (x, y) => coll.compare(x.n, y.n), m: (x, y) => x.m - y.m, s: (x, y) => (x.s || 0) - (y.s || 0),
-    t: (x, y) => coll.compare(typeOf(x), typeOf(y)), l: (x, y) => coll.compare(pathOf(x.p), pathOf(y.p)),
-  }[k];
-  return arr.sort((A, B) => (B.n.d - A.n.d) || f(A.n, B.n) * a || coll.compare(A.n.n, B.n.n));
+  const { k, a } = t.sort, f = SORTERS[k] || SORTERS.n;
+  return arr.sort((A, B) => (B.it.d - A.it.d) || f(A.it, B.it) * a || coll.compare(A.it.n, B.it.n));
 }
 
 const COLS = [['n', '名称'], ['l', '所在位置'], ['m', '修改日期'], ['t', '类型'], ['s', '大小']];
-const rel = (root, n) => chain(n).slice(chain(root).length).map(x => x.n).join('\\') || '（当前文件夹）';
+const relDir = (root, p) => { const d = parentOf(p); return same(d, root) ? '（当前文件夹）' : root === ROOT ? d : d.slice(root.length + (isDrive(root) ? 0 : 1)); };
 
 function renderList(pi, reset) {
-  const t = cur(pi), list = $('.list', panes[pi].el), view = t.view = getView(t);
+  const P = panes[pi], t = cur(pi), list = $('.list', P.el);
+  if (renaming === P) return;   // 正在重命名：先不重画，结束后再刷新
+  t.view = getView(t);
   const rec = !!(t.rec && t.res), q = t.q.trim(), span = rec ? 5 : 4;
   const head = COLS.filter(c => rec || c[0] !== 'l').map(([k, s]) => `<th class="c-${k}" data-s="${k}">${s}${t.sort.k === k ? (t.sort.a > 0 ? ' ▴' : ' ▾') : ''}</th>`).join('');
-  let rows = view.map(({ n, hl }, i) => `<tr class="row${t.sel.has(n) ? ' sel' : ''}" data-i="${i}" draggable="true">`
-    + `<td class="c-n">${iconOf(n)} ${hlName(n, hl)}</td>`
-    + (rec ? `<td class="c-l"><a data-loc="${i}" title="打开所在位置">${esc(rel(t.node, n.p))}</a></td>` : '')
-    + `<td class="c-m">${fmtDate(n.m)}</td><td class="c-t">${typeOf(n)}</td><td class="c-s">${n.d ? '' : fmtSize(n.s)}</td></tr>`).join('');
-  if (!view.length) rows = `<tr><td colspan="${span}" class="empty">${q ? (t.job ? '正在搜索…' : `没有找到与“${esc(q)}”匹配的项目`) : '此文件夹为空'}</td></tr>`;
-  if (q && !t.rec) rows += `<tr><td colspan="${span}" class="more">只筛选了当前文件夹 · <a data-a="deep">在所有子文件夹中搜索“${esc(q)}” ⏎</a></td></tr>`;
-  list.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+  let extra = '';
+  if (!t.view.length) {
+    const msg = t.err ? `无法打开此文件夹：${errText(t.err)}` : t.loading || !t.items && !rec ? '正在读取…' : q ? (t.job ? '正在搜索…' : `没有找到与“${esc(q)}”匹配的项目`) : '此文件夹为空';
+    extra = `<tr><td colspan="${span}" class="empty">${msg}</td></tr>`;
+  }
+  if (q && !t.rec) extra += `<tr><td colspan="${span}" class="more">只筛选了当前文件夹 · <a data-a="deep">在所有子文件夹中搜索“${esc(q)}” ⏎</a></td></tr>`;
+  if (rec && t.truncated) extra += `<tr><td colspan="${span}" class="more">结果太多，只显示前 ${t.res.length.toLocaleString()} 项，请加更多条件缩小范围</td></tr>`;
+  list.innerHTML = `<table${rec ? ' class="rec"' : ''}><thead><tr>${head}</tr></thead><tbody></tbody><tfoot>${extra}</tfoot></table>`;
+  P.range = null;
   if (reset) list.scrollTop = 0;
+  renderRows(P);
 }
 
-function scrollToNode(t, n) {
-  const pi = paneOf(t), i = t.view.findIndex(x => x.n === n);
-  if (pi >= 0 && i >= 0) panes[pi].el.querySelector(`tr[data-i="${i}"]`)?.scrollIntoView({ block: 'nearest' });
+// 虚拟滚动：只渲染可见区域附近的行，上下用占位行撑开高度
+function renderRows(P, force = true) {
+  if (renaming === P) return;
+  const t = P.tabs[P.act], list = $('.list', P.el), body = $('tbody', list);
+  if (!body) return;
+  const n = t.view.length, from = Math.max(0, Math.floor(list.scrollTop / ROW_H) - 20), to = Math.min(n, from + Math.ceil(list.clientHeight / ROW_H) + 40);
+  if (!force && P.range && P.range[0] === from && P.range[1] === to) return;
+  P.range = [from, to];
+  const rec = !!(t.rec && t.res), gap = h => `<tr class="gap" style="height:${h}px"><td colspan="${rec ? 5 : 4}"></td></tr>`;
+  let html = from ? gap(from * ROW_H) : '';
+  for (let i = from; i < to; i++) {
+    const { it, hl } = t.view[i];
+    html += `<tr class="row${t.sel.has(it.p) ? ' sel' : ''}${it.h ? ' hid' : ''}" data-i="${i}" draggable="true">`
+      + `<td class="c-n" title="${esc(it.n)}">${iconOf(it)} ${hlName(it, hl)}</td>`
+      + (rec ? `<td class="c-l"><a data-loc="${i}" title="打开所在位置">${esc(relDir(t.path, it.p))}</a></td>` : '')
+      + `<td class="c-m">${fmtDate(it.m)}</td><td class="c-t">${typeOf(it)}</td><td class="c-s">${sizeCell(it)}</td></tr>`;
+  }
+  if (to < n) html += gap((n - to) * ROW_H);
+  body.innerHTML = html;
 }
+function onListScroll(P) {
+  if (P.raf) return;
+  P.raf = requestAnimationFrame(() => { P.raf = 0; renderRows(P, false); });
+}
+const redrawSel = pi => { renderRows(panes[pi]); if (pi === ap) renderStatus(); };
+
+function scrollToPath(t, p) {
+  const pi = paneOf(t), i = t.view.findIndex(x => same(x.it.p, p));
+  if (pi < 0 || i < 0) return;
+  const list = $('.list', panes[pi].el), top = i * ROW_H, head = 28;
+  if (top < list.scrollTop) list.scrollTop = top;
+  else if (top + ROW_H + head > list.scrollTop + list.clientHeight) list.scrollTop = top + ROW_H + head - list.clientHeight;
+  renderRows(panes[pi]);
+}
+const rowEl = (pi, i) => panes[pi].el.querySelector(`tr[data-i="${i}"]`);
 
 function renderStatus() {
-  const t = cur(), sel = t.view.filter(x => t.sel.has(x.n)), size = sel.reduce((s, x) => s + (x.n.s || 0), 0);
-  let s = `<span>${t.rec && t.res ? `找到 ${t.res.length} 项` : `${t.view.length} 个项目`}</span>`;
+  const t = cur(), sel = t.view.filter(x => t.sel.has(x.it.p)), size = sel.reduce((s, x) => s + (x.it.d ? 0 : x.it.s || 0), 0);
+  let s = `<span>${t.rec && t.res ? `找到 ${t.res.length.toLocaleString()} 项` : `${t.view.length.toLocaleString()} 个项目`}</span>`;
   if (sel.length) s += `<span>已选择 ${sel.length} 项${size ? ' · ' + fmtSize(size) : ''}</span>`;
-  if (t.job) s += `<span><span class="prog"><b></b></span> 正在搜索子文件夹… 已扫描 ${t.scanned.toLocaleString()} 项 <a data-a="cancel">取消</a></span>`;
-  else if (t.rec && t.res) s += `<span>${t.cancelled ? '搜索已取消' : '搜索完成'}，扫描 ${t.scanned.toLocaleString()} 项，用时 ${t.ms} ms</span>`;
+  if (t.job) s += `<span><span class="prog"><b></b></span> 正在搜索${hasContent(t.q) ? '文件内容' : '子文件夹'}… 已扫描 ${t.scanned.toLocaleString()} 项 <a data-a="cancel">取消</a></span>`;
+  else if (t.rec && t.res) s += `<span>${t.cancelled ? '搜索已取消' : '搜索完成'}，扫描 ${t.scanned.toLocaleString()} 项，用时 ${(t.ms / 1000).toFixed(t.ms < 10000 ? 2 : 0)} 秒</span>`;
   s += `<span class="sp"></span><span>${panes.length > 1 ? (layout === 'v' ? '上下分屏' : '左右分屏') + ' · ' : ''}标签 ${panes[ap].act + 1}/${panes[ap].tabs.length}</span>`;
   statusEl.innerHTML = s;
-  $('#wtitle').textContent = pathOf(t.node);
-  document.querySelectorAll('.title [data-l]').forEach(b => b.classList.toggle('on', (b.dataset.l || null) === layout));
-  sideEl.querySelectorAll('[data-path]').forEach(d => d.classList.toggle('cur', resolve(d.dataset.path) === t.node));
+  const title = `${labelOf(t.path)} - DirApp`;
+  if (document.title !== title) { document.title = title; thisWin.setTitle(title).catch(() => {}); }
+  document.querySelectorAll('.tool [data-l]').forEach(b => b.classList.toggle('on', (b.dataset.l || null) === layout));
+  sideEl.querySelectorAll('[data-path]').forEach(d => d.classList.toggle('cur', same(d.dataset.path, t.path)));
 }
 
 function toast(html, ms = 2600) {
@@ -185,4 +266,25 @@ function toast(html, ms = 2600) {
   el.classList.add('show');
   clearTimeout(toast.t);
   toast.t = setTimeout(() => el.classList.remove('show'), ms);
+}
+
+// 目录监听：只监听各分屏当前显示的文件夹
+let watchKey = '';
+function syncWatch() {
+  const paths = [...new Set(panes.map((P, i) => cur(i).path).filter(p => p !== ROOT))];
+  const key = paths.join('|').toLowerCase();
+  if (key !== watchKey) { watchKey = key; invoke('watch_set', { paths }); }
+}
+listen('dir-changed', ({ payload }) => {
+  const set = new Set(payload.map(p => norm(p).toLowerCase()));
+  panes.forEach((P, i) => { const t = cur(i); if (t.path !== ROOT && set.has(t.path.toLowerCase()) && !t.loading) load(t, true); });
+});
+
+// 会话：主窗口保存分屏、标签、路径、排序，下次启动还原
+function saveSession() {
+  if (!IS_MAIN) return;
+  clearTimeout(saveSession.t);
+  saveSession.t = setTimeout(() => store.set('session', {
+    layout, ap, panes: panes.map(P => ({ act: P.act, tabs: P.tabs.map(t => ({ path: t.path, pin: !!t.pin, sort: t.sort })) })),
+  }), 300);
 }

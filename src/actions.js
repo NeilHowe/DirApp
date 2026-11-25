@@ -1,115 +1,140 @@
-// 文件操作（内存模拟）、右键菜单、键盘快捷键、启动
-let undo = null, clip = null;
+// 文件操作：复制/移动/删除走系统（有进度窗和冲突提示），剪贴板和资源管理器互通；重命名、移动可撤销
+let undo = null;
 
-function fixTabs() {   // 文件被删/移动后，修正各标签的路径、选择、搜索结果
-  for (const P of panes) for (const t of P.tabs) {
-    while (!attached(t.node)) t.node = t.node.p;
-    t.sel = new Set([...t.sel].filter(attached));
-    if (t.res) t.res = t.res.filter(x => attached(x.n));
-    t.back = t.back.filter(attached);
-    t.fwd = t.fwd.filter(attached);
-  }
-  closed = closed.filter(attached);
-  renderAll();
+// 操作完成后立即刷新受影响的文件夹（目录监听也会刷新，这里是为了不等 200ms）
+function reloadDirs(dirs) {
+  const set = new Set(dirs.filter(d => d != null).map(d => d.toLowerCase()));
+  panes.forEach((P, i) => { const t = cur(i); if (set.has(t.path.toLowerCase())) load(t, true); });
 }
 
-function del(t) {
-  const items = selNodes(t).filter(n => n.p !== ROOT);
+async function del(t, permanent = false) {
+  const items = selItems(t).filter(x => x.k !== 'drive');
   if (!items.length) return;
-  undo = items.map(n => ({ n, p: n.p, i: n.p.c.indexOf(n) })).sort((a, b) => a.i - b.i);
-  items.forEach(n => n.p.c.splice(n.p.c.indexOf(n), 1));
-  fixTabs();
-  toast(`已将 ${items.length} 个项目移到回收站 <a data-a="undo">撤销 (Ctrl+Z)</a>`, 5000);
+  try {
+    const ok = await invoke('file_delete', { paths: items.map(x => x.p), permanent });
+    if (!ok) return toast('已取消删除');
+    reloadDirs(items.map(x => parentOf(x.p)));
+    if (t.res) { const gone = new Set(items.map(x => x.p)); t.res = t.res.filter(x => !gone.has(x.it.p)); refresh(t, true); }
+    toast(permanent ? `已永久删除 ${items.length} 个项目` : `已将 ${items.length} 个项目移到回收站（可在回收站中还原）`, 4000);
+  } catch (e) { toast(errText(e), 5000); }
 }
-function doUndo() {
-  if (!undo) return;
-  undo.forEach(({ n, p, i }) => p.c.splice(i, 0, n));
+
+async function doUndo() {
+  const u = undo;
+  if (!u) return toast('没有可撤销的操作');
   undo = null;
-  fixTabs();
-  toast('已撤销删除');
+  try {
+    if (u.kind === 'rename') {
+      await invoke('file_rename', { path: u.to, name: baseName(u.from) });
+      reloadDirs([parentOf(u.from)]);
+      toast('已撤销重命名');
+    } else if (u.kind === 'move') {
+      const byDir = new Map();
+      for (const { from, to } of u.items) { const d = parentOf(from); byDir.set(d, [...(byDir.get(d) || []), to]); }
+      for (const [dir, paths] of byDir) await invoke('file_transfer', { paths, target: dir, copy: false });
+      reloadDirs([u.target, ...byDir.keys()]);
+      toast('已撤销移动');
+    }
+  } catch (e) { toast('撤销失败：' + errText(e), 5000); }
 }
 
-function uniq(dir, name, isDir) {
-  const has = s => dir.c.some(c => c.n.toLowerCase() === s.toLowerCase());
-  if (!has(name)) return name;
-  const i = isDir ? -1 : name.lastIndexOf('.'), b = i > 0 ? name.slice(0, i) : name, x = i > 0 ? name.slice(i) : '';
-  for (let k = 1; ; k++) { const s = `${b} - 副本${k > 1 ? ` (${k})` : ''}${x}`; if (!has(s)) return s; }
-}
-const clone = (n, p) => { const c = { ...n, p }; delete c.py; if (n.d) c.c = n.c.map(x => clone(x, c)); return c; };
-
-function transfer(nodes, target, copy) {
+async function transfer(paths, target, copy) {
   if (target === ROOT) return toast('不能放到“此电脑”根目录');
-  nodes = nodes.filter(n => attached(n) && n.p !== ROOT && (copy || n.p !== target) && !chain(target).includes(n));
-  if (!nodes.length) return;
-  for (const n of nodes) {
-    const name = uniq(target, n.n, n.d);
-    if (copy) { const c = clone(n, target); c.n = name; target.c.push(c); continue; }
-    n.p.c.splice(n.p.c.indexOf(n), 1);
-    Object.assign(n, { n: name, p: target });
-    delete n.py;
-    target.c.push(n);
-  }
-  fixTabs();
-  toast(`已${copy ? '复制' : '移动'} ${nodes.length} 个项目到 <b>${esc(label(target))}</b>`);
+  // 不能把文件夹移进它自己或它的子文件夹
+  paths = paths.filter(p => !isDrive(p) && !within(target, p) && (copy || !same(parentOf(p), target)));
+  if (!paths.length) return;
+  try {
+    const ok = await invoke('file_transfer', { paths, target, copy });
+    if (!ok) { reloadDirs([target, ...paths.map(parentOf)]); return toast('操作已取消'); }
+    if (!copy) undo = { kind: 'move', target, items: paths.map(p => ({ from: p, to: joinPath(target, baseName(p)) })) };
+    reloadDirs([target, ...paths.map(parentOf)]);
+    toast(`已${copy ? '复制' : '移动'} ${paths.length} 个项目到 <b>${esc(labelOf(target))}</b>${copy ? '' : ' <a data-a="undo">撤销 (Ctrl+Z)</a>'}`, 4000);
+  } catch (e) { toast(errText(e), 5000); }
 }
 
-function setClip(t, cut) {
-  const nodes = selNodes(t);
-  if (!nodes.length) return;
-  clip = { nodes, cut };
-  toast(`已${cut ? '剪切' : '复制'} ${nodes.length} 个项目，切换到其他文件夹/分屏后按 Ctrl+V 粘贴`);
-}
-function paste() {
-  if (!clip) return toast('剪贴板是空的');
-  transfer(clip.nodes, cur().node, !clip.cut);
-  if (clip.cut) clip = null;
-}
-function copyPath(n) {
-  navigator.clipboard?.writeText(pathOf(n)).catch(() => {});
-  toast(`已复制路径：${esc(pathOf(n))}`);
+async function setClip(t, cut) {
+  const items = selItems(t).filter(x => x.k !== 'drive');
+  if (!items.length) return;
+  try {
+    await invoke('clip_set_files', { paths: items.map(x => x.p), cut });
+    toast(`已${cut ? '剪切' : '复制'} ${items.length} 个项目，可在其他标签、分屏或资源管理器中粘贴`);
+  } catch (e) { toast(errText(e)); }
 }
 
-function rename(pi, n) {
-  if (n.p === ROOT) return toast('原型中不支持重命名磁盘');
-  const t = cur(pi), i = t.view.findIndex(x => x.n === n);
-  const td = i >= 0 && panes[pi].el.querySelector(`tr[data-i="${i}"] .c-n`);
+async function paste() {
+  const t = cur();
+  if (t.path === ROOT || (t.rec && t.res)) return toast('请先进入一个文件夹再粘贴');
+  try {
+    const { paths, cut } = await invoke('clip_get_files');
+    if (!paths.length) return toast('剪贴板里没有文件');
+    await transfer(paths, t.path, !cut);
+    if (cut) invoke('clip_clear');
+  } catch (e) { toast(errText(e)); }
+}
+
+function copyPath(items) {
+  const text = items.map(x => x.p).join('\r\n');
+  navigator.clipboard.writeText(text).then(() => toast(`已复制路径：${esc(items.length > 1 ? items.length + ' 个' : text)}`), () => toast('复制路径失败'));
+}
+
+function rename(pi, p) {
+  if (isDrive(p)) return toast('不支持在这里重命名磁盘');
+  const t = cur(pi);
+  scrollToPath(t, p);
+  const i = t.view.findIndex(x => x.it.p === p), td = i >= 0 && rowEl(pi, i)?.querySelector('.c-n');
   if (!td) return;
-  td.innerHTML = `${iconOf(n)} <input class="ren" value="${esc(n.n)}" spellcheck="false">`;
-  const inp = $('input', td), dot = n.d ? -1 : n.n.lastIndexOf('.');
+  const it = t.view[i].it;
+  renaming = panes[pi];
+  td.innerHTML = `${iconOf(it)} <input class="ren" value="${esc(it.n)}" spellcheck="false">`;
+  const inp = $('input', td), dot = it.d ? -1 : it.n.lastIndexOf('.');
   inp.focus();
-  inp.setSelectionRange(0, dot > 0 ? dot : n.n.length);   // 默认不选中扩展名
+  inp.setSelectionRange(0, dot > 0 ? dot : it.n.length);   // 默认不选中扩展名
   let fin = false;
-  const done = ok => {
+  const done = async ok => {
     if (fin) return;
     fin = true;
+    renaming = null;
     const v = inp.value.trim();
-    if (ok && v && v !== n.n) {
-      if (/[\\/:*?"<>|]/.test(v)) toast('文件名不能包含 \\ / : * ? " &lt; &gt; |');
-      else if (n.p.c.some(c => c !== n && c.n.toLowerCase() === v.toLowerCase())) toast(`已存在同名项目“${esc(v)}”`);
-      else { n.n = v; delete n.py; }
+    if (ok && v && v !== it.n) {
+      try {
+        const np = await invoke('file_rename', { path: it.p, name: v });
+        undo = { kind: 'rename', from: it.p, to: np };
+        Object.assign(it, { n: baseName(np), p: np, py: null });
+        t.sel = new Set([np]);
+        t.anchor = np;
+        load(t, true);
+      } catch (e) { toast(errText(e), 4000); }
     }
-    renderAll();
+    refresh(t, true);
+    $('.list', panes[pi].el).focus();
   };
   inp.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') done(true); if (e.key === 'Escape') done(false); };
   inp.onblur = () => done(true);
   inp.onclick = inp.ondblclick = inp.onmousedown = e => e.stopPropagation();
 }
 
-function newFolder(pi) {
+async function newFolder(pi) {
   const t = cur(pi);
-  if (t.node === ROOT) return toast('不能在“此电脑”中新建文件夹');
-  const f = { n: uniq(t.node, '新建文件夹', true), d: 1, m: Date.now(), c: [], p: t.node };
-  t.node.c.push(f);
-  if (t.q) { stopSearch(t); t.q = ''; t.res = null; }
-  t.sel = new Set([f]);
-  t.anchor = f;
-  refresh(t, true);
-  scrollToNode(t, f);
-  rename(pi, f);
+  if (t.path === ROOT) return toast('不能在“此电脑”中新建文件夹');
+  try {
+    const p = await invoke('new_folder', { dir: t.path });
+    if (t.q) { stopSearch(t); t.q = ''; t.res = null; }
+    t.sel = new Set([p]);
+    t.anchor = p;
+    await load(t, true);
+    rename(pi, p);
+  } catch (e) { toast(errText(e)); }
 }
 
-function props(n) {
-  let files = 0, dirs = 0, size = n.s || 0;
-  (function walk(x) { for (const c of x.c) { if (c.d) { dirs++; walk(c); } else { files++; size += c.s; } } })(n.d ? n : { c: [] });
-  toast(`<b>${esc(label(n))}</b> · ${typeOf(n)} · ${fmtSize(size)}${n.d ? ` · ${files} 个文件，${dirs} 个文件夹` : ''} · 修改于 ${fmtDate(n.m)}`, 4000);
+const props = p => invoke('shell_open', { path: p, verb: 'properties' }).catch(e => toast(errText(e)));
+const reveal = p => invoke('reveal_in_explorer', { path: p }).catch(e => toast(errText(e)));
+const terminal = dir => invoke('open_terminal', { dir }).catch(e => toast(errText(e)));
+
+// 标签移到新窗口：新窗口按 URL 参数打开这个路径
+async function toNewWindow(pi, ti) {
+  const P = panes[pi], t = P.tabs[ti];
+  try {
+    await invoke('open_window', { query: 'open=' + encodeURIComponent(t.path).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase()) });
+    if (allTabs().length > 1) closeTab(pi, ti);
+  } catch (e) { toast(errText(e)); }
 }

@@ -122,25 +122,76 @@ pub fn new_folder(dir: String) -> Result<String, String> {
     Err("无法创建文件夹".into())
 }
 
-/// 同步命令在主线程（已初始化 COM、有消息循环）里执行，属性对话框需要这个环境
-#[tauri::command]
-pub fn shell_open(path: String, verb: Option<String>) -> Result<(), String> {
-    let verb = verb.unwrap_or_else(|| "open".into());
-    let (v, p) = (wide(&verb), wide(&path));
+fn shell_exec(verb: &str, path: &str) -> Result<(), String> {
+    let (v, p) = (wide(verb), wide(path));
     let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
     info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
-    info.fMask = SEE_MASK_INVOKEIDLIST | SEE_MASK_FLAG_NO_UI;
+    info.fMask = SEE_MASK_INVOKEIDLIST | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
     info.lpVerb = v.as_ptr();
     info.lpFile = p.as_ptr();
     info.nShow = SW_SHOWNORMAL;
-    if unsafe { ShellExecuteExW(&mut info) } == 0 {
-        // 没有关联程序时弹出系统的“打开方式”
-        if verb == "open" {
-            return shell_open(path, Some("openas".into()));
-        }
-        return Err(format!("无法{}：{}", if verb == "properties" { "显示属性" } else { "打开" }, std::io::Error::last_os_error()));
+    if unsafe { ShellExecuteExW(&mut info) } != 0 {
+        return Ok(());
     }
-    Ok(())
+    let err = std::io::Error::last_os_error();
+    Err(format!("无法{}：{}", if verb == "properties" { "显示属性" } else { "打开" }, err))
+}
+
+/// 每次打开都在独立的 STA 线程里执行，不阻塞界面。属性对话框是建在调用线程上的，
+/// 所以这个线程要一直处理消息，直到它创建的窗口都关掉
+#[tauri::command]
+pub async fn shell_open(path: String, verb: Option<String>) -> Result<(), String> {
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    let verb = verb.unwrap_or_else(|| "open".into());
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
+    std::thread::spawn(move || unsafe {
+        CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
+        let mut r = shell_exec(&verb, &path);
+        // 没有关联程序（ERROR_NO_ASSOCIATION=1155）：先告诉前端成功，再弹系统的“打开方式”（这个调用会一直等到对话框关闭）
+        if verb == "open" && r.as_ref().is_err_and(|e| e.contains("1155")) {
+            let _ = tx.send(Ok(()));
+            r = shell_exec("openas", &path);
+            if r.is_err() {
+                return;
+            }
+        } else {
+            let failed = r.is_err();
+            let _ = tx.send(r);
+            if failed {
+                return;
+            }
+        }
+        unsafe extern "system" fn any_window(h: HWND, found: isize) -> i32 {
+            unsafe {
+                if IsWindowVisible(h) != 0 {
+                    *(found as *mut bool) = true;
+                    return 0;
+                }
+            }
+            1
+        }
+        let tid = GetCurrentThreadId();
+        let start = std::time::Instant::now();
+        let mut msg: MSG = std::mem::zeroed();
+        loop {
+            while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            let mut found = false;
+            EnumThreadWindows(tid, Some(any_window), &mut found as *mut bool as isize);
+            // 前 3 秒等对话框出现；之后没有窗口就结束线程
+            if !found && start.elapsed() > std::time::Duration::from_secs(3) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+    });
+    // 系统弹出“打开方式”等对话框时 ShellExecuteEx 要等对话框关掉才返回，这里最多等 1.5 秒就当作已打开
+    tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_millis(1500)).unwrap_or(Ok(())))
+        .await
+        .unwrap_or(Ok(()))
 }
 
 #[tauri::command]

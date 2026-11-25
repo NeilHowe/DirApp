@@ -1,6 +1,8 @@
 // 鼠标交互：标签、地址栏、列表选择、中键、拖放（标签排序/跨分屏、文件移动/复制）
-const pIdx = e => { const p = e.target.closest?.('.pane'); return p ? +p.dataset.p : -1; };
-const rowOf = (e, t) => { const r = e.target.closest?.('tr.row'); return r ? t.view[+r.dataset.i]?.it : null; };
+// 事件目标如果已被重新渲染掉（脱离文档），按鼠标坐标重新找元素
+const tgt = e => e.target.isConnected || e.clientX == null ? e.target : document.elementFromPoint(e.clientX, e.clientY) || e.target;
+const pIdx = e => { const p = tgt(e).closest?.('.pane'); return p ? +p.dataset.p : -1; };
+const rowOf = (e, t) => { const r = tgt(e).closest?.('tr.row'); return r ? t.view[+r.dataset.i]?.it : null; };
 const selItems = t => t.view.filter(x => t.sel.has(x.it.p)).map(x => x.it);
 
 function setActivePane(pi) {
@@ -104,7 +106,8 @@ panesEl.addEventListener('dblclick', e => {
   const pi = pIdx(e);
   if (pi < 0) return;
   const t = cur(pi);
-  if (e.target.closest('.tabs') && !e.target.closest('.tab, .addtab')) return openTab(t.path, pi);   // 双击标签栏空白 = 新标签
+  const el = tgt(e);
+  if (el.closest('.tabs') && !el.closest('.tab, .addtab')) return openTab(t.path, pi);   // 双击标签栏空白 = 新标签
   const it = rowOf(e, t);
   if (it) openItem(t, it);
 });

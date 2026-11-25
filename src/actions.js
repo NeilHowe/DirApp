@@ -52,24 +52,33 @@ async function transfer(paths, target, copy) {
   } catch (e) { toast(errText(e), 5000); }
 }
 
+// 系统剪贴板写不进去（被别的程序占着）时，退回到窗口内剪贴板，至少标签和分屏之间能复制粘贴
+let localClip = null;
 async function setClip(t, cut) {
   const items = selItems(t).filter(x => x.k !== 'drive');
   if (!items.length) return;
+  const paths = items.map(x => x.p), what = `已${cut ? '剪切' : '复制'} ${items.length} 个项目`;
   try {
-    await invoke('clip_set_files', { paths: items.map(x => x.p), cut });
-    toast(`已${cut ? '剪切' : '复制'} ${items.length} 个项目，可在其他标签、分屏或资源管理器中粘贴`);
-  } catch (e) { toast(errText(e)); }
+    await invoke('clip_set_files', { paths, cut });
+    localClip = null;
+    toast(`${what}，可在其他标签、分屏或资源管理器中粘贴`);
+  } catch {
+    localClip = { paths, cut };
+    toast(`${what}（系统剪贴板被其他程序占用，只能在 DirApp 内粘贴）`, 4000);
+  }
 }
 
 async function paste() {
   const t = cur();
   if (t.path === ROOT || (t.rec && t.res)) return toast('请先进入一个文件夹再粘贴');
-  try {
-    const { paths, cut } = await invoke('clip_get_files');
-    if (!paths.length) return toast('剪贴板里没有文件');
-    await transfer(paths, t.path, !cut);
-    if (cut) invoke('clip_clear');
-  } catch (e) { toast(errText(e)); }
+  let clip = localClip, sys = false;
+  if (!clip) {
+    try { clip = await invoke('clip_get_files'); sys = true; }
+    catch (e) { return toast(errText(e)); }
+  }
+  if (!clip.paths.length) return toast('剪贴板里没有文件');
+  await transfer(clip.paths, t.path, !clip.cut);
+  if (clip.cut) { if (sys) invoke('clip_clear').catch(() => {}); else localClip = null; }
 }
 
 function copyPath(items) {

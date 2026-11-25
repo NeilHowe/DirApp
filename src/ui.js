@@ -136,7 +136,7 @@ function renderAll() {
 
 function refresh(t, full, reset) {
   const pi = panes.findIndex(p => p.tabs.includes(t));
-  if (pi < 0) return;
+  if (pi < 0 || !panes[pi].el) return;   // 分屏刚建好、DOM 还没生成
   if (cur(pi) !== t) { if (full) renderTabs(pi); return; }   // 后台标签只更新标签栏
   if (full) renderPane(pi, reset); else renderList(pi);
   if (pi === ap) renderStatus();
@@ -233,7 +233,12 @@ function onListScroll(P) {
   if (P.raf) return;
   P.raf = requestAnimationFrame(() => { P.raf = 0; renderRows(P, false); });
 }
-const redrawSel = pi => { renderRows(panes[pi]); if (pi === ap) renderStatus(); };
+// 只改选中状态时不重建行：双击时第一下 click 如果重建了 DOM，dblclick 的目标元素就脱离文档了
+function redrawSel(pi) {
+  const P = panes[pi], t = P.tabs[P.act];
+  P.el.querySelectorAll('tr.row').forEach(r => r.classList.toggle('sel', t.sel.has(t.view[+r.dataset.i]?.it.p)));
+  if (pi === ap) renderStatus();
+}
 
 function scrollToPath(t, p) {
   const pi = paneOf(t), i = t.view.findIndex(x => same(x.it.p, p));

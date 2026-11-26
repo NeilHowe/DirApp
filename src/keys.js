@@ -40,55 +40,125 @@ function toOther(pi, ti) {
   moveTab(pi, ti, 1 - pi, panes[1 - pi].tabs.length);
 }
 
-panesEl.addEventListener('contextmenu', e => {
+// 文件、文件夹、磁盘和文件夹空白处弹 Windows 原生菜单：
+// “打开方式”“发送到”“新建”“属性”和第三方扩展（压缩、Git、编辑器）都在，Strata 自己的几项排在最上面。
+// 标签和“此电脑”的空白处仍用自家的菜单。
+async function nativeMenu(e, pi, t, it) {
+  const extras = [];
+  if (it) {
+    if (it.d) {
+      extras.push(['在新标签中打开', () => openTab(it.p, pi)]);
+      extras.push(['在另一侧分屏中打开', () => openOther(pi, it.p)]);
+    }
+    if (t.rec && t.res) extras.push(['打开所在位置', () => nav(t, parentOf(it.p), 'push', it.p)]);
+    if (it.d) extras.push(['收藏为常用文件夹', () => addFav(it.p)]);
+    extras.push(['复制路径', () => copyPath(selItems(t))]);
+  } else {
+    extras.push(['新建文件夹', () => newFolder(pi)]);
+    extras.push(['在子文件夹中搜索', () => setMode(t, true)]);
+    extras.push(['收藏为常用文件夹', () => addFav(t.path)]);
+    extras.push([settings.hidden ? '不显示隐藏文件' : '显示隐藏文件', () => toggleHidden()]);
+  }
+  // 用键盘（Shift+F10）弹出时没有鼠标坐标，就贴着选中行显示
+  let x = e.clientX, y = e.clientY;
+  if (!x && !y) {
+    const i = it ? t.view.findIndex(v => v.it.p === it.p) : -1;
+    const r = (i >= 0 && rowEl(pi, i)?.getBoundingClientRect()) || $('.list', panes[pi].el).getBoundingClientRect();
+    x = r.x + 24;
+    y = r.y + 14;
+  }
+  let r;
+  try {
+    r = await invoke('shell_menu', {
+      paths: it ? selItems(t).map(v => v.p) : [],
+      dir: it ? null : t.path,
+      extras: extras.map(v => v[0]),
+      x, y, dpr: devicePixelRatio, shift: e.shiftKey,
+    });
+  } catch (err) {
+    return false;   // 系统菜单不可用：退回自家的菜单
+  }
+  window.__lastMenu = r;   // 调试和自测用
+  if (r.kind === 'extra') {
+    extras[r.id]?.[1]();
+  } else if (r.kind === 'verb') {
+    // 这三项由 Strata 自己做，和双击、F2、Del 的行为一致
+    if (r.verb === 'open') openItem(t, it || selItems(t)[0]);
+    else if (r.verb === 'rename') { const s = selItems(t); if (s.length === 1) rename(pi, s[0].p); else toast('一次只能重命名一项'); }
+    else if (r.verb === 'delete') del(t);
+  } else if (r.kind === 'invoked') {
+    if (r.verb === 'copy' || r.verb === 'cut') localClip = null;   // 之后粘贴以系统剪贴板为准
+    const dir = it ? parentOf(it.p) : t.path;
+    setTimeout(() => reloadDirs([dir]), 400);
+    if (t.rec && t.res) setTimeout(() => { const c = cur(pi); if (c.rec && c.q.trim()) startSearch(c); }, 700);
+  }
+  return true;
+}
+
+function tabMenu(e, pi, ti) {
+  const P = panes[pi], x = P.tabs[ti];
+  showMenu(e, [
+    ['新建标签', () => openTab(x.path, pi), 'Ctrl+T', 'tabPlus'],
+    ['复制标签', () => { const c = openTab(x.path, pi, true, ti + 1); c.back = [...x.back]; renderAll(); }, '', 'copy'],
+    [x.pin ? '取消固定' : '固定标签', () => pinTab(pi, ti), '', 'pin'],
+    null,
+    ['移到另一侧分屏', () => toOther(pi, ti), '', 'splitH'],
+    ['移到新窗口', () => toNewWindow(pi, ti), '', 'window'],
+    null,
+    ['关闭标签', () => closeTab(pi, ti), 'Ctrl+W', 'close'],
+    ['关闭其他标签', () => closeOthers(pi, x)],
+    ['关闭右侧标签', () => closeOthers(pi, x, true)],
+  ]);
+}
+
+// 系统菜单不可用时的替代菜单
+function customItemMenu(e, pi, t, it) {
+  const sel = selItems(t), drive = it.k === 'drive';
+  showMenu(e, [
+    ['打开', () => openItem(t, it), 'Enter', 'folderOpen'],
+    ...(it.d ? [['在新标签中打开', () => openTab(it.p, pi, false), '中键', 'tabPlus'], ['在另一侧分屏中打开', () => openOther(pi, it.p), '', 'splitH']] : [['打开方式…', () => invoke('shell_open', { path: it.p, verb: 'openas' }).catch(err => toast(errText(err))), '', 'openWith']]),
+    ...(t.rec && t.res ? [['打开所在位置', () => nav(t, parentOf(it.p), 'push', it.p), '', 'location']] : []),
+    ['在资源管理器中显示', () => reveal(it.p), '', 'external'],
+    null,
+    ...(drive ? [] : [['剪切', () => setClip(t, true), 'Ctrl+X', 'cut'], ['复制', () => setClip(t, false), 'Ctrl+C', 'copy']]),
+    ['复制路径', () => copyPath(sel), 'Ctrl+Shift+C', 'link'],
+    ...(it.d ? [['在终端中打开', () => terminal(it.p), '', 'terminal']] : []),
+    null,
+    ...(drive ? [] : [['重命名', () => rename(pi, it.p), 'F2', 'edit'], ['删除', () => del(t), 'Del', 'trash']]),
+    ['属性', () => props(it.p), 'Alt+Enter', 'info'],
+  ]);
+}
+
+function customBgMenu(e, pi, t) {
+  const dir = t.path !== ROOT;
+  showMenu(e, [
+    ...(dir ? [['新建文件夹', () => newFolder(pi), 'Ctrl+Shift+N', 'folderPlus'], ['粘贴', paste, 'Ctrl+V', 'paste']] : []),
+    ['刷新', () => load(t, true), 'F5', 'refresh'],
+    null,
+    ['在子文件夹中搜索', () => setMode(t, true), 'Ctrl+Shift+F', 'search'],
+    ...(dir ? [['收藏为常用文件夹', () => addFav(t.path), '', 'star'], ['在终端中打开', () => terminal(t.path), '', 'terminal'], ['在资源管理器中打开', () => invoke('shell_open', { path: t.path }), '', 'external'], ['属性', () => props(t.path), '', 'info']] : []),
+    null,
+    [settings.hidden ? '不显示隐藏文件' : '显示隐藏文件', toggleHidden, 'Ctrl+H', settings.hidden ? 'eyeOff' : 'eye'],
+  ]);
+}
+
+panesEl.addEventListener('contextmenu', async e => {
   const pi = pIdx(e);
   if (pi < 0 || e.target.closest('input')) return;
+  e.preventDefault();
+  menu.hidden = true;
   setActivePane(pi);
-  const P = panes[pi], t = cur(pi), te = e.target.closest('.tab');
-  if (te) {
-    const ti = +te.dataset.t, x = P.tabs[ti];
-    return showMenu(e, [
-      ['新建标签', () => openTab(x.path, pi), 'Ctrl+T', 'tabPlus'],
-      ['复制标签', () => { const c = openTab(x.path, pi, true, ti + 1); c.back = [...x.back]; renderAll(); }, '', 'copy'],
-      [x.pin ? '取消固定' : '固定标签', () => pinTab(pi, ti), '', 'pin'],
-      null,
-      ['移到另一侧分屏', () => toOther(pi, ti), '', 'splitH'],
-      ['移到新窗口', () => toNewWindow(pi, ti), '', 'window'],
-      null,
-      ['关闭标签', () => closeTab(pi, ti), 'Ctrl+W', 'close'],
-      ['关闭其他标签', () => closeOthers(pi, x)],
-      ['关闭右侧标签', () => closeOthers(pi, x, true)],
-    ]);
-  }
+  const t = cur(pi), te = e.target.closest('.tab');
+  if (te) return tabMenu(e, pi, +te.dataset.t);
   const it = rowOf(e, t);
   if (it) {
     if (!t.sel.has(it.p)) { t.sel = new Set([it.p]); t.anchor = it.p; redrawSel(pi); }
-    const sel = selItems(t), drive = it.k === 'drive';
-    return showMenu(e, [
-      ['打开', () => openItem(t, it), 'Enter', 'folderOpen'],
-      ...(it.d ? [['在新标签中打开', () => openTab(it.p, pi, false), '中键', 'tabPlus'], ['在另一侧分屏中打开', () => openOther(pi, it.p), '', 'splitH']] : [['打开方式…', () => invoke('shell_open', { path: it.p, verb: 'openas' }).catch(err => toast(errText(err))), '', 'openWith']]),
-      ...(t.rec && t.res ? [['打开所在位置', () => nav(t, parentOf(it.p), 'push', it.p), '', 'location']] : []),
-      ['在资源管理器中显示', () => reveal(it.p), '', 'external'],
-      null,
-      ...(drive ? [] : [['剪切', () => setClip(t, true), 'Ctrl+X', 'cut'], ['复制', () => setClip(t, false), 'Ctrl+C', 'copy']]),
-      ['复制路径', () => copyPath(sel), 'Ctrl+Shift+C', 'link'],
-      ...(it.d ? [['在终端中打开', () => terminal(it.p), '', 'terminal']] : []),
-      null,
-      ...(drive ? [] : [['重命名', () => rename(pi, it.p), 'F2', 'edit'], ['删除', () => del(t), 'Del', 'trash']]),
-      ['属性', () => props(it.p), 'Alt+Enter', 'info'],
-    ]);
+    if (await nativeMenu(e, pi, t, it)) return;
+    return customItemMenu(e, pi, t, it);
   }
   if (e.target.closest('.list')) {
-    const dir = t.path !== ROOT;
-    return showMenu(e, [
-      ...(dir ? [['新建文件夹', () => newFolder(pi), 'Ctrl+Shift+N', 'folderPlus'], ['粘贴', paste, 'Ctrl+V', 'paste']] : []),
-      ['刷新', () => load(t, true), 'F5', 'refresh'],
-      null,
-      ['在子文件夹中搜索', () => setMode(t, true), 'Ctrl+Shift+F', 'search'],
-      ...(dir ? [['收藏此文件夹', () => addFav(t.path), '', 'star'], ['在终端中打开', () => terminal(t.path), '', 'terminal'], ['在资源管理器中打开', () => invoke('shell_open', { path: t.path }), '', 'external'], ['属性', () => props(t.path), '', 'info']] : []),
-      null,
-      [settings.hidden ? '不显示隐藏文件' : '显示隐藏文件', toggleHidden, 'Ctrl+H', settings.hidden ? 'eyeOff' : 'eye'],
-    ]);
+    if (t.path !== ROOT && await nativeMenu(e, pi, t, null)) return;
+    return customBgMenu(e, pi, t);
   }
 });
 

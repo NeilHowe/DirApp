@@ -1,5 +1,6 @@
 mod clip;
 mod fs;
+mod menu;
 mod query;
 mod search;
 mod shell;
@@ -61,6 +62,8 @@ pub fn run() {
             clip::clip_get_files,
             clip::clip_clear,
             watch::watch_set,
+            menu::shell_menu,
+            menu::shell_menu_preview,
             open_window,
         ])
         .run(tauri::generate_context!())
